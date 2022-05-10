@@ -1,0 +1,114 @@
+plugins {
+  id 'java-library'
+  id 'application'
+  id 'nebula.ospackage' version '8.5.6'
+}
+
+group = 'org.swimos'
+description = 'Code corresponding to the HTTP Ingress Bridges cookbook'
+version = property('swim.version')
+ext.swimVersion = project.property('swim.version')
+
+mainClassName = 'swim.forex.ForexPlane'
+
+dependencies {
+  // api group: 'org.swimos', name: 'swim-api', version: version
+  // api group: 'org.swimos', name: 'swim-server', version: version
+  // implementation group: 'inc.swim', name: 'swim-adapters', version: version
+  // implementation group: 'inc.swim', name: 'swim-quilt', version: version
+  implementation fileTree(dir: 'libs', include: ['*.jar'])
+}
+
+compileJava {
+  options.compilerArgs += ['-Xlint:all']
+  options.encoding = 'UTF-8'
+}
+
+jar {
+  manifest {
+    attributes('Implementation-Title': project.name,
+            'Implementation-Version': archiveVersion,
+            'Main-Class': project.mainClassName)
+  }
+}
+
+task nativeImage(type: Exec) {
+  dependsOn jar
+
+  def outDir = "${buildDir}/native"
+  doFirst {
+    mkdir outDir
+  }
+
+  workingDir projectDir
+  doFirst {
+    commandLine [
+            "${System.getenv('JAVA_HOME')}/bin/native-image",
+            '-cp', sourceSets.main.runtimeClasspath.asPath,
+            "-H:Path=${outDir}",
+            "-H:Name=${project.name}",
+            "-H:ReflectionConfigurationFiles=${projectDir}/native/reflection.json",
+            "-H:ResourceConfigurationFiles=${projectDir}/native/resources.json",
+            '--no-server',
+            '--no-fallback',
+            '--initialize-at-build-time',
+            '--enable-all-security-services',
+            '--enable-http',
+            '--enable-https',
+            "${mainClassName}",
+    ]
+  }
+}
+
+ospackage {
+  release '1'
+  prefix '/opt/swim-forex'
+}
+
+task packageDeb(type: Deb) {
+  maintainer = 'developer@swimos.org'
+
+  configurationFile("/etc/sysconfig/${project.name}")
+  preInstall "addgroup --quiet --system ${project.name}"
+  preInstall "adduser --quiet --system --ingroup ${project.name} --no-create-home --disabled-password ${project.name}"
+  postInstall "systemctl preset ${project.name} > /dev/null 2>&1"
+  postInstall "systemctl start ${project.name} > /dev/null 2>&1"
+  preUninstall  "systemctl disable ${project.name} > /dev/null 2>&1"
+  preUninstall  "systemctl stop ${project.name} > /dev/null 2>&1"
+  postUninstall "systemctl daemon-reload > /dev/null 2>&1"
+
+  from('pkg') {
+    into '/etc/systemd/system'
+    include '*.service'
+    addParentDirs false
+    expand project.properties
+    user 'root'
+    permissionGroup 'root'
+    fileMode = 0644
+  }
+
+  from('pkg') {
+    into '/etc/sysconfig'
+    include "${project.name}"
+    user 'root'
+    permissionGroup 'root'
+    fileMode = 0644
+    fileType CONFIG | NOREPLACE
+  }
+}
+
+task copyDockerResources(type: Copy) {
+  from tasks.jar.outputs
+  from configurations.runtimeClasspath
+  into "${buildDir}/docker/libs"
+}
+
+task copyDockerfile(type: Copy) {
+  from 'docker/Dockerfile'
+  into "${buildDir}/docker"
+}
+
+task dockerBuildImage() {
+  dependsOn copyDockerResources
+  dependsOn copyDockerfile
+}
