@@ -20,6 +20,11 @@ compileJava {
   options.encoding = 'UTF-8'
 }
 
+task copyDockerUi(type: Copy) {
+  from 'ui'
+  into "${buildDir}/docker/ui"
+}
+
 task copyDockerResources(type: Copy) {
   from tasks.jar.outputs
   from configurations.runtimeClasspath
@@ -32,6 +37,7 @@ task copyDockerfile(type: Copy) {
 }
 
 task dockerBuildImage() {
+  dependsOn copyDockerUi
   dependsOn copyDockerResources
   dependsOn copyDockerfile
 }
